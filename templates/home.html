@@ -1,29 +1,100 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<h1 class="mb-4">Consulta el clima de tu ciudad</h1>
+<style>
+  .search-container {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
 
-<form id="weatherForm">
-  <input type="text" id="cityInput" placeholder="Ingrese una ciudad" required>
-  <button type="submit">Buscar clima</button>
-</form>
+  .search-form {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
 
-<div id="alert-box" style="display:none" class="alert alert-danger"></div>
+  .search-input {
+    flex: 1;
+    padding: 0.5rem 1rem;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    font-size: 1rem;
+  }
 
-<div id="weatherResult" style="display: none;">
-  <h2 id="cityName"></h2>
-  <p>Temperatura: <span id="temp"></span> °C</p>
-  <p>Humedad: <span id="humidity"></span> %</p>
-  <p>Descripción: <span id="description"></span></p>
-  <img id="weatherIcon" src="" alt="Icono del clima" />
-</div>
+  .search-button {
+    padding: 0.5rem 1.5rem;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
 
-<div id="forecast-container" class="row mt-4"></div>
+  .search-button:hover {
+    background-color: var(--primary-dark);
+    transform: translateY(-1px);
+  }
 
-<!-- Pronóstico extendido -->
-<div class="container mt-5">
-  <h2>Pronóstico Extendido</h2>
-  <canvas id="forecastChart"></canvas>
+  .weather-card {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    padding: 2rem;
+    margin-bottom: 2rem;
+  }
+
+  .weather-icon {
+    width: 100px;
+    height: 100px;
+  }
+</style>
+
+<div class="search-container">
+  <h1 class="text-center mb-4">
+    <i class="fas fa-cloud-sun text-primary me-2"></i>
+    Consulta el clima de tu ciudad
+  </h1>
+
+  <form id="weatherForm" class="search-form">
+    <input type="text" id="cityInput" class="search-input" placeholder="Ingrese una ciudad" required>
+    <button type="submit" class="search-button">
+      <i class="fas fa-search me-2"></i>
+      Buscar
+    </button>
+  </form>
+
+  <div class="container mt-5">
+    <div id="alert-box" class="alert" style="display: none;"></div>
+
+    <div id="weatherResult" style="display: none;" class="weather-card">
+      <div class="text-center mb-4">
+        <h2 id="cityName" class="mb-3"></h2>
+        <img id="weatherIcon" src="" alt="Clima" class="weather-icon mb-3">
+        <div class="current-weather">
+          <h3 class="display-4 mb-3">
+            <span id="temp"></span>°C
+          </h3>
+          <p class="fs-5 mb-2" id="description"></p>
+          <p class="text-muted">
+            <i class="fas fa-tint me-2"></i>
+            Humedad: <span id="humidity"></span>%
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div id="forecast-container" class="row g-3"></div>
+
+    <!-- Pronóstico extendido -->
+    <div class="forecast-section mt-5">
+      <h2 class="h4 mb-3">Pronóstico Extendido</h2>
+      <div class="chart-container" style="position: relative; height: 400px; width: 100%;">
+        <canvas id="forecastChart"></canvas>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -32,38 +103,147 @@
 document.getElementById('weatherForm').addEventListener('submit', function(e) {
   e.preventDefault();
   const city = document.getElementById('cityInput').value;
+  
+  // Mostrar estado de carga
+  document.getElementById('weatherResult').style.display = 'none';
+  document.getElementById('alert-box').style.display = 'none';
 
+  // Primera llamada para el clima actual
   fetch(`/api/weather/current?city=${encodeURIComponent(city)}`)
-    .then(response => response.json())
-    .then(data => {
-      if (data.temperature && data.description) {
-        document.getElementById('cityName').textContent = data.city;
-        document.getElementById('temp').textContent = data.temperature;
-        document.getElementById('humidity').textContent = (data.humidity !== undefined && data.humidity !== null) ? data.humidity : 'N/A';
-        document.getElementById('description').textContent = data.description;
-        document.getElementById('weatherIcon').src = `https://openweathermap.org/img/wn/${data.icon}@2x.png`;
-        document.getElementById('weatherResult').style.display = 'block';
-
-        cargarClimaExtendido(data.city);
-      } else if (data.error) {
-        alert(data.error);
-        document.getElementById('weatherResult').style.display = 'none';
-      } else {
-        alert('No se encontraron datos para esa ciudad');
-        document.getElementById('weatherResult').style.display = 'none';
+    .then(response => {
+      if (!response.ok) {
+        return response.json().then(err => {
+          throw new Error(err.error || 'Error al obtener datos del clima');
+        });
       }
+      return response.json();
+    })
+    .then(data => {
+      // Validar los datos antes de procesarlos
+      if (!data || !data.main || !data.weather || data.weather.length === 0) {
+        throw new Error('Datos del clima incompletos');
+      }
+      
+      // Mostrar el resultado del clima
+      displayWeather(data);
+      
+      // Preparar datos para el historial solo si tenemos toda la información necesaria
+      const weatherData = {
+        city: data.name || city,
+        temperature: data.main.temp,
+        humidity: data.main.humidity,
+        description: data.weather[0].description,
+        icon: data.weather[0].icon
+      };
+
+      // Validar que tenemos todos los datos necesarios
+      const requiredFields = ['city', 'temperature', 'humidity', 'description', 'icon'];
+      const missingFields = requiredFields.filter(field => !weatherData[field]);
+      
+      if (missingFields.length > 0) {
+        throw new Error(`Faltan campos requeridos: ${missingFields.join(', ')}`);
+      }
+
+      // Intentar guardar en el historial
+      return fetch('/api/weather/save-history/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(weatherData)
+      });
+    })
+    .then(response => {
+      if (!response.ok) {
+        if (response.status === 401) {
+          showAlert('Debes iniciar sesión para guardar el historial');
+        }
+        return;
+      }
+      return response.json();
     })
     .catch(err => {
-      console.error('Error al consultar:', err);
-      alert('Error al consultar el clima');
+      console.error('Error:', err);
+      showAlert(err.message || 'Error al consultar el clima');
     });
 });
+
+function showAlert(message) {
+  const alertBox = document.getElementById('alert-box');
+  alertBox.textContent = message;
+  alertBox.style.display = 'block';
+  
+  if (message === 'Debes iniciar sesión para guardar el historial') {
+    alertBox.className = 'alert alert-warning';
+  } else {
+    alertBox.className = 'alert alert-danger';
+  }
+  
+  setTimeout(() => {
+    alertBox.style.display = 'none';
+  }, 5000);
+}
+
+function getCookie(name) {
+  let cookieValue = null;
+  if (document.cookie && document.cookie !== '') {
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.substring(0, name.length + 1) === (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+        break;
+      }
+    }
+  }
+  return cookieValue;
+}
+
+function displayWeather(data) {
+  try {
+    if (!data || !data.main || !data.weather || !data.weather[0]) {
+      throw new Error('Datos del clima incompletos');
+    }
+
+    const weatherResult = document.getElementById('weatherResult');
+    weatherResult.style.display = 'block';
+    document.getElementById('alert-box').style.display = 'none';
+
+    // Actualizar los elementos con los datos del clima
+    document.getElementById('cityName').textContent = data.name || 'Ciudad no encontrada';
+    document.getElementById('temp').textContent = data.main.temp ? data.main.temp.toFixed(1) : 'N/A';
+    document.getElementById('humidity').textContent = data.main.humidity || 'N/A';
+    document.getElementById('description').textContent = 
+      data.weather[0].description ? 
+      data.weather[0].description.charAt(0).toUpperCase() + data.weather[0].description.slice(1) : 
+      'Sin descripción';
+    
+    // Actualizar el ícono del clima
+    const iconElement = document.getElementById('weatherIcon');
+    if (data.weather[0].icon) {
+      iconElement.src = `https://openweathermap.org/img/wn/${data.weather[0].icon}@2x.png`;
+      iconElement.style.display = 'inline';
+    } else {
+      iconElement.style.display = 'none';
+    }
+
+    // Cargar el pronóstico extendido
+    if (data.name) {
+      cargarClimaExtendido(data.name);
+    }
+  } catch (error) {
+    console.error('Error al mostrar el clima:', error);
+    showAlert('Error al mostrar los datos del clima');
+    document.getElementById('weatherResult').style.display = 'none';
+  }
+}
 
 function cargarClimaExtendido(city) {
   fetch(`/api/weather/forecast?city=${encodeURIComponent(city)}`)
     .then(response => response.json())
     .then(data => {
-      // --- Gráfico ---
       const labels = [];
       const temps = [];
 
@@ -76,7 +256,6 @@ function cargarClimaExtendido(city) {
 
       const ctx = document.getElementById('forecastChart').getContext('2d');
       
-      // Limpiar canvas si ya hay gráfico previo (opcional)
       if(window.myChart) window.myChart.destroy();
 
       window.myChart = new Chart(ctx, {
@@ -86,100 +265,63 @@ function cargarClimaExtendido(city) {
           datasets: [{
             label: 'Temperatura (°C)',
             data: temps,
-            fill: false,
-            borderColor: 'blue',
-            tension: 0.1
+            borderColor: '#0d6efd',
+            backgroundColor: 'rgba(13, 110, 253, 0.1)',
+            tension: 0.1,
+            fill: true,
+            borderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6
           }]
         },
         options: {
           responsive: true,
+          maintainAspectRatio: false,
           plugins: {
-            legend: { display: true }
+            legend: {
+              position: 'top',
+              labels: {
+                font: {
+                  size: 14
+                }
+              }
+            },
+            title: {
+              display: true,
+              text: 'Pronóstico de temperatura para los próximos días',
+              font: {
+                size: 16,
+                weight: 'bold'
+              },
+              padding: 20
+            }
           },
           scales: {
-            y: { beginAtZero: false }
+            y: {
+              beginAtZero: false,
+              grid: {
+                color: 'rgba(0,0,0,0.1)'
+              },
+              ticks: {
+                font: {
+                  size: 12
+                }
+              }
+            },
+            x: {
+              grid: {
+                color: 'rgba(0,0,0,0.1)'
+              },
+              ticks: {
+                font: {
+                  size: 12
+                }
+              }
+            }
           }
         }
       });
-
-      // --- Tarjetas con tooltip ---
-      const container = document.getElementById("forecast-container");
-      container.innerHTML = "";
-
-      data.list.forEach((item, index) => {
-        if (index % 8 !== 0) return;
-
-        const tooltip = `
-            Fecha: ${item.dt_txt}<br>
-            Temperatura: ${item.main.temp}°C<br>
-            Humedad: ${item.main.humidity}%<br>
-            Viento: ${item.wind.speed} m/s
-        `;
-
-        const card = document.createElement("div");
-        card.className = "col-md-2 m-2 p-2 border rounded text-center bg-light";
-        card.setAttribute("title", tooltip);
-        card.innerHTML = `
-            <p><strong>${item.dt_txt.split(" ")[0]}</strong></p>
-            <img src="http://openweathermap.org/img/wn/${item.weather[0].icon}.png" alt="icon">
-            <p>${item.main.temp}°C</p>
-        `;
-        container.appendChild(card);
-      });
-    })
-    .catch(err => {
-      console.error("Error cargando pronóstico:", err);
     });
 }
-
-if ("geolocation" in navigator) {
-  navigator.geolocation.getCurrentPosition(position => {
-    const lat = position.coords.latitude;
-    const lon = position.coords.longitude;
-
-    fetch(`/api/weather/alerts?lat=${lat}&lon=${lon}`)
-      .then(response => response.json())
-      .then(data => {
-        if (data.alerts.length > 0) {
-          const alertBox = document.getElementById("alert-box");
-          alertBox.innerHTML = `<strong>Alerta:</strong> ${data.alerts[0].description}`;
-          alertBox.style.display = "block";
-        }
-      });
-  }, error => {
-    console.error("Error obteniendo ubicación:", error);
-  });
-} else {
-  console.warn("La geolocalización no está disponible en este navegador.");
-}
-
-window.addEventListener('load', function () {
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(position => {
-      const lat = position.coords.latitude;
-      const lon = position.coords.longitude;
-
-      // Consulta el clima actual usando lat/lon
-      fetch(`/api/weather/current?lat=${lat}&lon=${lon}`)
-        .then(response => response.json())
-        .then(data => {
-          if (data.city) {
-            document.getElementById('cityInput').value = data.city;
-
-            // Ejecutar la lógica como si el usuario hubiera enviado el formulario
-            document.getElementById('weatherForm').dispatchEvent(new Event('submit'));
-          }
-        })
-        .catch(error => {
-          console.error('Error al obtener ubicación:', error);
-        });
-    }, error => {
-      console.warn('Permiso de geolocalización denegado o falló.');
-    });
-  } else {
-    console.warn('Geolocalización no está disponible en este navegador.');
-  }
-});
 </script>
-
 {% endblock %}

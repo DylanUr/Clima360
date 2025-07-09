@@ -11,7 +11,10 @@ from .forms import CustomUserCreationForm
 from django.contrib.auth import login
 from .permissions import IsOwnerOrReadOnly
 from .serializers import SearchHistorySerializer
-from rest_framework import generics
+from rest_framework import generics, status
+from django.views import View
+from django.http import JsonResponse
+import json
 
 
 permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
@@ -22,48 +25,52 @@ def home(request):
 
 #Para saber el clima actualmente
 class CurrentWeatherView(APIView):
-    permission_classes = [IsAuthenticatedOrReadOnly]# Permite acceso a usuarios autenticados o no autenticados los no autenticados solo pueden ver el clima actual y sin historial
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    
     def get(self, request):
-        lat = request.GET.get('lat')
-        lon = request.GET.get('lon')
-        city = request.GET.get('city')
-
-        api_key = config("OPENWEATHER_API_KEY")
-
-        if city:
-            url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric&lang=es"
-        elif lat and lon:
-            url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric&lang=es"
-        else:
-            return Response({"error": "Debe proporcionar una ciudad o coordenadas"}, status=400)
-
-        response = requests.get(url)
-        data = response.json()
-
-        # Verificar si la respuesta es exitosa para obtener los datos del clima
-        # y si no, devolver un mensaje de error adecuado
-        if response.status_code == 200:
-            weather_data = {
-                "city": data.get("name"),
-                "temperature": data["main"].get("temp"),
-                "humidity": data["main"].get("humidity"),
-                "description": data["weather"][0].get("description"),
-                "icon": data["weather"][0].get("icon")
-            }
-
-            # Guardar en historial si el usuario está autenticado 
-            if request.user.is_authenticated and weather_data["city"]:
-                SearchHistory.objects.create(
-                    user=request.user,
-                    city=weather_data["city"],
-                    temperature=data["main"].get("temp"),
-                    humidity=data["main"].get("humidity"),
-                    description=data["weather"][0].get("description")
+        try:
+            city = request.GET.get('city')
+            lat = request.GET.get('lat')
+            lon = request.GET.get('lon')
+            
+            api_key = config("OPENWEATHER_API_KEY")
+            base_url = "https://api.openweathermap.org/data/2.5/weather"
+            
+            if city:
+                url = f"{base_url}?q={city}&appid={api_key}&units=metric&lang=es"
+            elif lat and lon:
+                url = f"{base_url}?lat={lat}&lon={lon}&appid={api_key}&units=metric&lang=es"
+            else:
+                return Response(
+                    {"error": "Se requiere ciudad o coordenadas"},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
 
-            return Response(weather_data)
-        else:
-            return Response({"error": data.get("message", "Error desconocido")}, status=response.status_code)
+            import requests
+            response = requests.get(url)
+            
+            if response.status_code != 200:
+                return Response(
+                    {"error": "Ciudad no encontrada"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+                
+            data = response.json()
+            
+            # Validar que los datos necesarios estén presentes
+            if not data.get('main') or not data.get('weather'):
+                return Response(
+                    {"error": "Datos del clima incompletos"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            return Response(data)
+            
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 # Para saber el clima actualmente, pero con JsonResponse
 def current_weather(request):
@@ -170,5 +177,39 @@ def register(request):
 # Vista para el historial de búsqueda de los usuarios autenticados
 @login_required
 def weather_history_view(request):
+    # Obtener el historial del usuario actual ordenado por fecha más reciente
     history = SearchHistory.objects.filter(user=request.user).order_by('-searched_at')
     return render(request, 'history.html', {'history': history})
+
+class SaveSearchHistoryView(View):
+    def post(self, request):
+        if not request.user.is_authenticated:
+            return JsonResponse({
+                'error': 'Authentication required'
+            }, status=401)
+            
+        try:
+            data = json.loads(request.body)
+            SearchHistory.objects.create(
+                user=request.user,
+                city=data['city'],
+                temperature=data['temperature'],
+                humidity=data['humidity'],
+                description=data['description'],
+                icon=data['icon']
+            )
+            return JsonResponse({
+                'message': 'Search history saved successfully'
+            }, status=200)
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'error': 'Invalid JSON data'
+            }, status=400)
+        except KeyError as e:
+            return JsonResponse({
+                'error': f'Missing required field: {str(e)}'
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'error': 'An error occurred while saving the search'
+            }, status=500)

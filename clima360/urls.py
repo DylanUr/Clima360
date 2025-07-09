@@ -15,23 +15,24 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.urls import path, include
-from weather.views import ForecastWeatherView, CurrentWeatherView, CitySearchView, WeatherAlertsView, home, weather_history_view, register
+from weather.views import (
+    ForecastWeatherView, CurrentWeatherView, CitySearchView, 
+    WeatherAlertsView, home, weather_history_view, register,
+    SaveSearchHistoryView  # Añadimos la nueva vista
+)
 from weather.swagger import urlpatterns as swagger_urls
 from django.contrib.auth import views as auth_views
 from rest_framework_simplejwt.views import (TokenObtainPairView, TokenRefreshView,)
-
-#para pruebas de la API
 from django.contrib import admin
-from django.urls import path
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-
     path('', home, name='home'),
     path('api/weather/current', CurrentWeatherView.as_view()),
     path('api/weather/forecast', ForecastWeatherView.as_view()),
     path('api/cities/search', CitySearchView.as_view()),
     path('api/weather/alerts', WeatherAlertsView.as_view()),
+    path('api/weather/save-history/', SaveSearchHistoryView.as_view(), name='save-history'),  # Nueva ruta
     path('historial/', weather_history_view, name='weather-history'),
     path('accounts/', include('django.contrib.auth.urls')),
     path('register/', register, name='register'),
